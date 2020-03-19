@@ -42,10 +42,21 @@ func stdlib(args []string) error {
 	if goroot == "" {
 		return fmt.Errorf("GOROOT not set")
 	}
+
 	output := abs(*out)
 
-	// Link in the bare minimum needed to the new GOROOT
-	if err := replicate(goroot, output, replicatePaths("src", "pkg/tool", "pkg/include")); err != nil {
+	options := make([]replicateOption, 0)
+	// Link in the bare minimum needed to the new GOROOT.  In the case of
+	// sdk-in-a-zip, we need to unpack additional bin tools and relocate the
+	// goenv.sdk to point to the unpacked location.
+	sdkPaths := []string{"src", "pkg/tool", "pkg/include"}
+	if goenv.sdkzip != "" {
+		sdkPaths = append(sdkPaths, "bin")
+		options = append(options, replicateFromZip(goenv.sdkzip))
+		goenv.sdk = output
+	}
+	options = append(options, replicatePaths(sdkPaths...))
+	if err := replicate(goroot, output, options...); err != nil {
 		return err
 	}
 

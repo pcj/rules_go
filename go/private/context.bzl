@@ -420,6 +420,7 @@ def go_context(ctx, attr = None):
         importpath_aliases = importpath_aliases,
         pathtype = pathtype,
         cgo_tools = context_data.cgo_tools,
+        zipper = toolchain._zipper,
         nogo = nogo,
         coverdata = coverdata,
         coverage_enabled = ctx.configuration.coverage_enabled,
