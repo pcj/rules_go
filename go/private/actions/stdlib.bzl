@@ -77,11 +77,39 @@ def _build_stdlib(go):
             "CGO_CFLAGS": " ".join(go.cgo_tools.c_compile_options),
             "CGO_LDFLAGS": " ".join(extldflags_from_cc_toolchain(go)),
         })
-    inputs = (go.sdk.srcs +
-              go.sdk.headers +
-              go.sdk.tools +
-              [go.sdk.go, go.sdk.package_list, go.sdk.root_file] +
-              go.crosstool)
+
+    sdk_inputs = go.sdk.srcs + go.sdk.headers + go.sdk.tools + [go.sdk.go, go.sdk.root_file]
+
+    # Existence of the go.zipper executable being defined here is the signal
+    # that we are executing under remote execution.  In this case an additional
+    # action is created to package the sdk files into a single zip file rather
+    # than 6100+ individual files.  An additional flag naming the zip file is
+    # passed to the builder that will unpackage it. 
+    if go.zipper:
+        sdkzip = go.actions.declare_file("sdk.zip")
+        # for zipper usage see
+        # https://github.com/bazelbuild/bazel/blob/master/third_party/ijar/zip_main.cc#L354
+        zipargs = go.actions.args()
+        zipargs.add("cC", sdkzip.path)
+        # builder expects zip entries relative to GOROOT
+        prefixlen = len(go.sdk.root_file.dirname) + 1
+        for f in sdk_inputs:
+            rel = f.path[prefixlen:]
+            zipargs.add(rel+"="+f.path)
+
+        archive = go.actions.run(
+            inputs = sdk_inputs,
+            outputs = [sdkzip],
+            mnemonic = "GoStdlibZip",
+            progress_message = "Packaging %s stdlib files" % len(sdk_inputs),
+            executable = go.zipper,
+            arguments = [zipargs],
+        )
+        sdk_inputs = [sdkzip]
+        args.add("-sdkzip", sdkzip.path)
+
+    inputs = sdk_inputs + go.crosstool + [go.sdk.package_list]
+
     outputs = [pkg, src]
     go.actions.run(
         inputs = inputs,

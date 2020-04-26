@@ -54,9 +54,10 @@ def _go_toolchain_impl(ctx):
 
         # Internal fields -- may be read by emit functions.
         _builder = ctx.executable.builder,
+        _zipper = ctx.executable.zipper,
     )]
 
-go_toolchain = rule(
+_go_toolchain = rule(
     _go_toolchain_impl,
     attrs = {
         # Minimum requirements to specify a toolchain
@@ -87,10 +88,26 @@ go_toolchain = rule(
         "cgo_link_flags": attr.string_list(
             doc = "Flags passed to the external linker (if it is used)",
         ),
+        # helper tool for the stdlib action
+        "zipper": attr.label(
+            cfg = "exec",
+            executable = True,
+            doc = "The zipper helper utility",
+        ),
+
     },
     doc = "Defines a Go toolchain based on an SDK",
     provides = [platform_common.ToolchainInfo],
 )
+
+def go_toolchain(**kwargs):
+    """Macro wrapping go_toolchain (to be able to use select expressions)."""
+    kwargs.setdefault("zipper", select({
+        "@bazel_tools//src/conditions:remote": "@bazel_tools//third_party/ijar:zipper",
+        "//conditions:default": None,
+    }))
+    _go_toolchain(**kwargs)
+
 
 def declare_toolchains(host, sdk, builder):
     """Declares go_toolchain and toolchain targets for each platform."""

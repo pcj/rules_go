@@ -47,6 +47,10 @@ type env struct {
 	// platform. This may be different than GOROOT.
 	sdk string
 
+	// sdk is the path to the Go SDK package as a zip file.  This is only used
+	// when building the stdlib, as an optimization for remote execution.
+	sdkzip string
+
 	// installSuffix is the name of the directory below GOROOT/pkg that contains
 	// the .a files for the standard library we should build against.
 	// For example, linux_amd64_race.
@@ -66,6 +70,7 @@ type env struct {
 func envFlags(flags *flag.FlagSet) *env {
 	env := &env{}
 	flags.StringVar(&env.sdk, "sdk", "", "Path to the Go SDK.")
+	flags.StringVar(&env.sdkzip, "sdkzip", "", "Path to the Go SDK (as a zip archive)")
 	flags.Var(&tagFlag{}, "tags", "List of build tags considered true.")
 	flags.StringVar(&env.installSuffix, "installsuffix", "", "Standard library under GOROOT/pkg")
 	flags.BoolVar(&env.verbose, "v", false, "Whether subprocess command lines should be printed")

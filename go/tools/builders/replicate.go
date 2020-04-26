@@ -16,10 +16,12 @@
 package main
 
 import (
+	"archive/zip"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type replicateMode int
@@ -36,8 +38,24 @@ type replicateConfig struct {
 	fileMode    replicateMode
 	dirMode     replicateMode
 	paths       []string
+	zip         string
 }
 
+// replicator implementations are capable to copying a filetree from src to dst
+// under the specified configuration settings
+type replicator interface {
+	Replicate(src, dst string, config *replicateConfig) error
+}
+
+// replicateFromZip is a replicateOption that sets the configuration zip file
+// name.
+func replicateFromZip(zip string) replicateOption {
+	return func(config *replicateConfig) {
+		config.zip = zip
+	}
+}
+
+// replicatePaths is a replicateOption that sets the configuration file paths
 func replicatePaths(paths ...string) replicateOption {
 	return func(config *replicateConfig) {
 		config.paths = append(config.paths, paths...)
@@ -56,6 +74,27 @@ func replicatePrepare(dst string, config *replicateConfig) error {
 	return nil
 }
 
+// createFile takes a file source reader and FileInfo, creates at file at dst,
+// and updates the file mode.
+func createFile(in io.Reader, stat os.FileInfo, dst string) error {
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, in)
+	closeerr := out.Close()
+	if err != nil {
+		return err
+	}
+	if closeerr != nil {
+		return closeerr
+	}
+	if err := os.Chmod(dst, stat.Mode()); err != nil {
+		return err
+	}
+	return nil
+}
+
 // replicateFile is called internally by replicate to map a single file from src into dst.
 func replicateFile(src, dst string, config *replicateConfig) error {
 	if err := replicatePrepare(dst, config); err != nil {
@@ -63,31 +102,16 @@ func replicateFile(src, dst string, config *replicateConfig) error {
 	}
 	switch config.fileMode {
 	case copyMode:
+		s, err := os.Stat(src)
+		if err != nil {
+			return err
+		}
 		in, err := os.Open(src)
 		if err != nil {
 			return err
 		}
 		defer in.Close()
-		out, err := os.Create(dst)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(out, in)
-		closeerr := out.Close()
-		if err != nil {
-			return err
-		}
-		if closeerr != nil {
-			return closeerr
-		}
-		s, err := os.Stat(src)
-		if err != nil {
-			return err
-		}
-		if err := os.Chmod(dst, s.Mode()); err != nil {
-			return err
-		}
-		return nil
+		return createFile(in, s, dst)
 	case hardlinkMode:
 		return os.Link(src, dst)
 	case softlinkMode:
@@ -153,15 +177,100 @@ func replicate(src, dst string, options ...replicateOption) error {
 	for _, option := range options {
 		option(&config)
 	}
+
+	var replicator replicator
+	if config.zip == "" {
+		replicator = &filesystemReplicator{}
+	} else {
+		replicator = &zipReplicator{}
+	}
+
+	return replicator.Replicate(src, dst, &config)
+}
+
+// filesystemReplicator implements the replicator interface when source paths
+// represent pre-existing entries in the filesystem.
+type filesystemReplicator struct {
+}
+
+// Replicate is called for each single src dst pair.
+func (r *filesystemReplicator) Replicate(src, dst string, config *replicateConfig) error {
 	if len(config.paths) == 0 {
-		return replicateTree(src, dst, &config)
+		return replicateTree(src, dst, config)
 	}
 	for _, base := range config.paths {
 		from := filepath.Join(src, base)
 		to := filepath.Join(dst, base)
-		if err := replicateTree(from, to, &config); err != nil {
+		if err := replicateTree(from, to, config); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+// zipReplicator implements the replicator interface when source paths represent
+// entries in a zip archive.
+type zipReplicator struct {
+}
+
+// Replicate is called for each single src dst pair.
+func (r *zipReplicator) Replicate(src, dst string, config *replicateConfig) error {
+	in, err := zip.OpenReader(config.zip)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	dirs := make(map[string]bool)
+	files := make([]*zip.File, 0)
+
+	// Collect all the zipfile entries of interest based on path prefixes in the
+	// config.
+	// TODO: construct a prefix trie here to remove this nested loop
+	for _, f := range in.File {
+		for _, path := range config.paths {
+			if strings.HasPrefix(f.Name, path) {
+				if f.FileInfo().IsDir() {
+					// Although this check for IsDir is done, in practice the
+					// bazel zipper utility does not create zip *directory*
+					// entries, so in the usual case this branch is never
+					// executed.
+					dirs[f.Name] = true
+				} else {
+					files = append(files, f)
+					dirs[filepath.Dir(f.Name)] = true
+				}
+				break
+			}
+		}
+	}
+
+	extract := func(file *zip.File) error {
+		to := filepath.Join(dst, file.Name)
+		if err := os.MkdirAll(filepath.Dir(to), os.ModePerm); err != nil {
+			return err
+		}
+		f, err := file.Open()
+		if err != nil {
+			return fmt.Errorf("could not open zip file entry %s: %v", file.Name, err)
+		}
+		defer f.Close()
+
+		return createFile(f, file.FileInfo(), to)
+	}
+
+	for dir := range dirs {
+		to := filepath.Join(dst, dir)
+		if err := replicatePrepare(to, config); err != nil {
+			return err
+		}
+	}
+
+	for _, f := range files {
+		if err := extract(f); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
