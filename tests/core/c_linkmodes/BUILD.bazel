@@ -78,7 +78,7 @@ cc_test(
     }),
     copts = select({
         "@io_bazel_rules_go//go/platform:windows": [],
-        "//conditions:default": ['-DSO=\\"$(rootpath :crypto)\\"'],
+        "//conditions:default": ["-DSO=\\\"$(rootpath :crypto)\\\""],
     }),
     data = select({
         "@io_bazel_rules_go//go/platform:windows": [],

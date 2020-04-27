@@ -94,7 +94,6 @@ _go_toolchain = rule(
             executable = True,
             doc = "The zipper helper utility",
         ),
-
     },
     doc = "Defines a Go toolchain based on an SDK",
     provides = [platform_common.ToolchainInfo],
@@ -107,7 +106,6 @@ def go_toolchain(**kwargs):
         "//conditions:default": None,
     }))
     _go_toolchain(**kwargs)
-
 
 def declare_toolchains(host, sdk, builder):
     """Declares go_toolchain and toolchain targets for each platform."""

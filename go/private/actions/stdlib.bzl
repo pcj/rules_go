@@ -84,18 +84,20 @@ def _build_stdlib(go):
     # that we are executing under remote execution.  In this case an additional
     # action is created to package the sdk files into a single zip file rather
     # than 6100+ individual files.  An additional flag naming the zip file is
-    # passed to the builder that will unpackage it. 
+    # passed to the builder that will unpackage it.
     if go.zipper:
         sdkzip = go.actions.declare_file("sdk.zip")
+
         # for zipper usage see
         # https://github.com/bazelbuild/bazel/blob/master/third_party/ijar/zip_main.cc#L354
         zipargs = go.actions.args()
         zipargs.add("cC", sdkzip.path)
+
         # builder expects zip entries relative to GOROOT
         prefixlen = len(go.sdk.root_file.dirname) + 1
         for f in sdk_inputs:
             rel = f.path[prefixlen:]
-            zipargs.add(rel+"="+f.path)
+            zipargs.add(rel + "=" + f.path)
 
         archive = go.actions.run(
             inputs = sdk_inputs,
